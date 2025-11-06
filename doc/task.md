@@ -22,7 +22,43 @@
 
    * 定义 `Card`, `Deck`, `Zone`（手牌、牌堆、弃牌、奖赏、板凳等）
    * 建立唯一 `card_uid` 分配与追踪机制
-   * 支持 JSON 载入卡组结构，支持Limitless卡组中"Copy to Clipboard"方式导出的卡组数据
+   * 支持 JSON 载入卡组结构，支持Limitless卡组中"Copy to Clipboard"方式导出的卡组数据，下面是一个卡组数据的示例
+```
+Pokémon: 21
+4 Charmander PAF 7
+2 Charmeleon MEW 5
+3 Charizard ex OBF 125
+2 Pidgey OBF 162
+1 Pidgeotto MEW 17
+2 Pidgeot ex OBF 164
+2 Duskull PRE 35
+1 Dusclops PRE 36
+1 Dusknoir PRE 37
+1 Cleffa OBF 80
+1 Chi-Yu PAR 29
+1 Fezandipiti ex SFA 38
+
+Trainer: 32
+4 Arven OBF 186
+3 Iono PAL 185
+3 Boss's Orders PAL 172
+1 Jacq SVI 175
+1 Briar SCR 132
+4 Buddy-Buddy Poffin TEF 144
+3 Ultra Ball SVI 196
+3 Rare Candy SVI 191
+2 Counter Catcher PAR 160
+2 Super Rod PAL 188
+1 Nest Ball SVI 181
+1 Technical Machine: Evolution PAR 178
+1 Air Balloon BLK 79
+1 Maximum Belt TEF 154
+2 Artazon PAL 171
+
+Energy: 7
+6 Fire Energy SVE 18
+1 Mist Energy TEF 161
+```
 
 4. **动作掩码系统（Legal Action Mask）**
 

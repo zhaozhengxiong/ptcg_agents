@@ -1,0 +1,8 @@
+
+[run]
+branch = True
+source = core, env, agents
+
+[report]
+show_missing = True
+skip_covered = True

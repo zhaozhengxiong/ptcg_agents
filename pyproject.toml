@@ -1,0 +1,55 @@
+
+[tool.poetry]
+name = "ptcg-ai-starter"
+version = "0.1.0"
+description = "PTCG 多智能体策略分析与对战系统 - 项目初始化脚手架"
+authors = ["You <you@example.com>"]
+readme = "README.md"
+packages = [
+    { include = "core" },
+    { include = "env" },
+    { include = "agents" },
+]
+
+[tool.poetry.dependencies]
+python = ">=3.10,<3.13"
+numpy = "^1.26"
+pydantic = "^2.9"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.2"
+pytest-cov = "^5.0"
+coverage = "^7.6"
+black = "^24.8"
+isort = "^5.13"
+mypy = "^1.11"
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+addopts = "-ra -q --cov --cov-report=term-missing"
+testpaths = ["tests"]
+
+[tool.coverage.run]
+branch = true
+source = ["core", "env", "agents"]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = true
+
+[tool.black]
+line-length = 100
+target-version = ["py310", "py311", "py312"]
+
+[tool.isort]
+profile = "black"
+
+[tool.mypy]
+python_version = "3.10"
+check_untyped_defs = true
+ignore_missing_imports = true
+warn_unused_ignores = true
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"

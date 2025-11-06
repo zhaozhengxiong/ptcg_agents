@@ -1,14 +1,8 @@
 
-from dataclasses import dataclass
-from typing import Dict, Any, Optional
 import random
+from typing import Dict, Any, Optional
 
-@dataclass
-class StepResult:
-    state: Dict[str, Any]
-    reward: float
-    done: bool
-    info: Dict[str, Any]
+from env.types import StepResult
 
 class SimpleEnv:
     """极简环境示例：随机产生奖励，便于 pipeline 验证。"""

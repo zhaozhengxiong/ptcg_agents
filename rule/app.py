@@ -1,49 +1,155 @@
-import os
-from dotenv import load_dotenv
-load_dotenv()
+"""FastAPI application exposing the SimpleEnv over HTTP for the NestJS API."""
 
-from openai import OpenAI
-# —— Agents SDK （与你上一条消息的代码风格一致）——
-# 这里假设 openai-agents-python 暴露以下 API：
-from agents import Agent, Runtime, Message
+from __future__ import annotations
 
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+from dataclasses import dataclass, field
+from hashlib import sha256
+import json
+from typing import Any, Dict, List, Optional
+from uuid import uuid4
 
-runtime = Runtime(client=client, model="gpt-4o")
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel, Field
 
-# —— 业务工具举例（自定义函数）——
-def search_orders(keyword: str) -> list[str]:
-    return [f"Order#{i}-{keyword}" for i in range(3)]
+from env.simple_env import SimpleEnv
 
-# —— 定义三个 Agent —— 
-planner = Agent(
-    name="planner",
-    instructions=(
-        "你是总策划。分解用户目标，决定应调用的专家Agent或工具；"
-        "当结果足够时结束。"
-    ),
-)
 
-researcher = Agent(
-    name="researcher",
-    instructions="你擅长检索与整合资料，给出简洁要点。",
-)
+@dataclass
+class EnvironmentSession:
+    """Tracks a running environment instance and its replay information."""
 
-ops = Agent(
-    name="ops",
-    instructions="你负责业务执行，调用搜索订单等内部函数并产出清单。",
-    tools=[search_orders],   # 绑定自定义函数工具
-)
+    env: SimpleEnv
+    seed: Optional[int]
+    ruleset_version: str
+    actions: List[Dict[str, Any]] = field(default_factory=list)
+    states: List[Dict[str, Any]] = field(default_factory=list)
+    state_hashes: List[str] = field(default_factory=list)
 
-# 让 planner 可以把其他 Agent 当“工具”调用（agents-as-tools）
-planner.tools += [researcher.as_tool(), ops.as_tool()]
+    def record_state(self, state: Dict[str, Any]) -> None:
+        self.states.append(state)
+        serialised = json.dumps(state, sort_keys=True, separators=(",", ":"))
+        self.state_hashes.append(sha256(serialised.encode("utf-8")).hexdigest())
 
-if __name__ == "__main__":
-    task = "帮我找出近一个月热销的产品关键词：'手机壳'，并生成一份备货清单。"
-    result = runtime.run(
-        agent=planner,
-        messages=[Message.from_user(task)],
-        max_turns=8
-    )
-    print("\n=== 输出 ===\n")
-    print(result.output_text)
+
+class CreateEnvRequest(BaseModel):
+    seed: Optional[int] = Field(default=None, description="Randomness seed for the environment")
+    ruleset_version: str = Field(default="v0", description="Ruleset version identifier")
+
+
+class CreateEnvResponse(BaseModel):
+    env_id: str
+    state: Dict[str, Any]
+    seed: Optional[int]
+    ruleset_version: str
+
+
+class StepRequest(BaseModel):
+    env_id: str
+    action: Optional[Dict[str, Any]] = None
+
+
+class StepResponse(BaseModel):
+    state: Dict[str, Any]
+    reward: float
+    done: bool
+    info: Dict[str, Any]
+
+
+class ReplayResponse(BaseModel):
+    env_id: str
+    seed: Optional[int]
+    ruleset_version: str
+    actions: List[Dict[str, Any]]
+    states: List[Dict[str, Any]]
+    state_hashes: List[str]
+
+
+class LegalActionsResponse(BaseModel):
+    env_id: str
+    actions: List[Dict[str, Any]]
+
+
+class EnvironmentManager:
+    """In-memory registry of running environments."""
+
+    def __init__(self) -> None:
+        self._sessions: Dict[str, EnvironmentSession] = {}
+
+    def create(self, seed: Optional[int], ruleset_version: str) -> CreateEnvResponse:
+        env_id = str(uuid4())
+        env = SimpleEnv(seed=seed)
+        session = EnvironmentSession(env=env, seed=seed, ruleset_version=ruleset_version)
+        initial_state = env.reset()
+        session.record_state(initial_state)
+        self._sessions[env_id] = session
+        return CreateEnvResponse(
+            env_id=env_id,
+            state=initial_state,
+            seed=seed,
+            ruleset_version=ruleset_version,
+        )
+
+    def require_session(self, env_id: str) -> EnvironmentSession:
+        if env_id not in self._sessions:
+            raise HTTPException(status_code=404, detail="Environment not found")
+        return self._sessions[env_id]
+
+    def step(self, env_id: str, action: Optional[Dict[str, Any]]) -> StepResponse:
+        session = self.require_session(env_id)
+        result = session.env.step(action)
+        session.actions.append(action or {})
+        session.record_state(result.state)
+        return StepResponse(
+            state=result.state,
+            reward=result.reward,
+            done=result.done,
+            info=result.info,
+        )
+
+    def legal_actions(self, env_id: str) -> LegalActionsResponse:
+        session = self.require_session(env_id)
+        if session.env.done:
+            actions: List[Dict[str, Any]] = []
+        else:
+            actions = [{"type": "noop"}]
+        return LegalActionsResponse(env_id=env_id, actions=actions)
+
+    def replay(self, env_id: str) -> ReplayResponse:
+        session = self.require_session(env_id)
+        return ReplayResponse(
+            env_id=env_id,
+            seed=session.seed,
+            ruleset_version=session.ruleset_version,
+            actions=session.actions,
+            states=session.states,
+            state_hashes=session.state_hashes,
+        )
+
+
+manager = EnvironmentManager()
+app = FastAPI(title="PTCG Rule Service", version="0.1.0")
+
+
+@app.get("/healthz")
+def health_check() -> Dict[str, str]:
+    return {"status": "ok"}
+
+
+@app.post("/env/create", response_model=CreateEnvResponse)
+def create_env(payload: CreateEnvRequest) -> CreateEnvResponse:
+    return manager.create(seed=payload.seed, ruleset_version=payload.ruleset_version)
+
+
+@app.post("/env/step", response_model=StepResponse)
+def step_env(payload: StepRequest) -> StepResponse:
+    return manager.step(env_id=payload.env_id, action=payload.action)
+
+
+@app.get("/env/legal_actions", response_model=LegalActionsResponse)
+def legal_actions(envId: str) -> LegalActionsResponse:
+    return manager.legal_actions(env_id=envId)
+
+
+@app.get("/env/replay", response_model=ReplayResponse)
+def get_replay(envId: str) -> ReplayResponse:
+    return manager.replay(env_id=envId)

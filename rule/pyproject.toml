@@ -10,6 +10,7 @@ packages = [
     { include = "env" },
     { include = "agents" },
     { include = "rules" },
+    { include = "auto_card_ir_gen", from = "auto-card-IR-gen" },
 ]
 
 [tool.poetry.dependencies]
@@ -34,7 +35,7 @@ testpaths = ["tests"]
 
 [tool.coverage.run]
 branch = true
-source = ["core", "env", "agents", "rules"]
+source = ["core", "env", "agents", "rules", "auto_card_ir_gen"]
 
 [tool.coverage.report]
 show_missing = true

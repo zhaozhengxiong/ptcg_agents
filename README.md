@@ -54,4 +54,13 @@ Pidgey MEW 16
 EOF
 ```
 
+> ⚠️ 常见陷阱：进入 `rule/` 目录后再次在命令中写入 `rule/scripts/...` 会让解释器去寻找
+> `rule/rule/scripts`，从而触发 `can't open file ...: [Errno 2] No such file or directory`
+> 的报错。若你更习惯在仓库根目录执行命令，可以保持 `rule/scripts/...` 的写法，但需要
+> 将 `poetry run` 的工作目录显式指向 `rule/`，例如：
+>
+> ```bash
+> poetry run -C rule python rule/scripts/card_ir_demo.py
+> ```
+
 脚本默认使用 `postgresql://localhost:5432/pokemon` 连接串将原始卡牌数据与 IR 存入 PostgreSQL， 可以通过 `--database` 覆盖，或使用 `--api-key` 传入 PokemonTCG.io 的密钥。

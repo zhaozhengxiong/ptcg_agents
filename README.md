@@ -63,4 +63,4 @@ EOF
 > poetry run -C rule python rule/scripts/card_ir_demo.py
 > ```
 
-脚本默认使用 `postgresql://localhost:5432/pokemon` 连接串将原始卡牌数据与 IR 存入 PostgreSQL， 可以通过 `--database` 覆盖，或使用 `--api-key` 传入 PokemonTCG.io 的密钥。
+脚本默认使用 `postgresql://postgres@localhost:5432/pokemon` 连接串将原始卡牌数据与 IR 存入 PostgreSQL。若数据库要求密码，可在 URL 中写入凭据，或者通过环境变量 `POKEMON_DB_USER` / `POKEMON_DB_PASSWORD`（亦支持 `PGUSER` / `PGPASSWORD`）提供账号信息；命令行会在连接失败时给出相应提示。也可以使用 `--api-key` 传入 PokemonTCG.io 的密钥。

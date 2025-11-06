@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime
@@ -11,9 +12,40 @@ from typing import Any, Callable, Dict, Iterable, Iterator, Optional
 try:  # pragma: no cover - optional dependency for real PostgreSQL usage
     import psycopg
     from psycopg.rows import dict_row
+    from psycopg.conninfo import conninfo_to_dict, make_conninfo
 except Exception:  # pragma: no cover - keep optional import silent
     psycopg = None  # type: ignore[assignment]
     dict_row = None  # type: ignore[assignment]
+
+
+def _merge_connection_overrides(database_url: str) -> tuple[str, Dict[str, Any]]:
+    """Merge environment supplied credentials into a PostgreSQL URL."""
+
+    if psycopg is None:  # pragma: no cover - import guard
+        return database_url, {"conninfo": database_url, "row_factory": dict_row}
+
+    info = conninfo_to_dict(database_url)
+    overrides: Dict[str, Any] = {}
+
+    env_user = os.getenv("POKEMON_DB_USER") or os.getenv("PGUSER")
+    env_password = os.getenv("POKEMON_DB_PASSWORD") or os.getenv("PGPASSWORD")
+
+    if env_user and not info.get("user"):
+        overrides["user"] = env_user
+    if env_password and not info.get("password"):
+        overrides["password"] = env_password
+
+    # Preserve original URL if nothing needs to change.
+    if not overrides:
+        return database_url, {"conninfo": database_url, "row_factory": dict_row}
+
+    merged = {**info, **{k: v for k, v in overrides.items() if v}}
+    # psycopg requires falsy values to be omitted when rebuilding the DSN.
+    rebuilt = make_conninfo(**{k: v for k, v in merged.items() if v not in (None, "")})
+    connect_kwargs: Dict[str, Any] = {"conninfo": rebuilt, "row_factory": dict_row}
+    if overrides.get("password"):
+        connect_kwargs["password"] = overrides["password"]
+    return rebuilt, connect_kwargs
 
 from .exceptions import ReviewError
 
@@ -67,8 +99,10 @@ class Storage:
     ) -> None:
         if not database_url.startswith("postgres"):
             raise ValueError("Storage only supports PostgreSQL connection URLs")
-        self._database_url = database_url
+        updated_url, connect_kwargs = _merge_connection_overrides(database_url)
+        self._database_url = updated_url
         self._connection_factory = connection_factory
+        self._connect_kwargs = connect_kwargs
         if self._connection_factory is None and psycopg is None:  # pragma: no cover - env guard
             raise RuntimeError(
                 "psycopg is required for PostgreSQL storage but is not installed in this environment"
@@ -82,7 +116,15 @@ class Storage:
             conn = self._connection_factory()
         else:  # pragma: no cover - requires psycopg at runtime
             assert psycopg is not None
-            conn = psycopg.connect(self._database_url, row_factory=dict_row)
+            try:
+                conn = psycopg.connect(**self._connect_kwargs)
+            except Exception as exc:  # pragma: no cover - runtime guard
+                if isinstance(exc, psycopg.OperationalError):
+                    raise psycopg.OperationalError(
+                        "Failed to connect to PostgreSQL. Provide credentials in the URL or via "
+                        "POKEMON_DB_USER/POKEMON_DB_PASSWORD (or PGUSER/PGPASSWORD)."
+                    ) from exc
+                raise
         try:
             yield conn
             conn.commit()

@@ -20,6 +20,11 @@ from auto_card_ir_gen import (  # noqa: E402  - local path injection happens abo
 )
 from rules.engine import RuleEngine  # noqa: E402
 
+try:  # pragma: no cover - optional import for nicer error messages
+    import psycopg
+except Exception:  # pragma: no cover - fallback to generic handling
+    psycopg = None
+
 
 @dataclass(slots=True)
 class CardRequest:
@@ -93,8 +98,11 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--database",
-        default="postgresql://localhost:5432/pokemon",
-        help="PostgreSQL URL used to persist raw payloads and compiled rules (default: %(default)s)",
+        default="postgresql://postgres@localhost:5432/pokemon",
+        help=(
+            "PostgreSQL URL used to persist raw payloads and compiled rules. "
+            "Credentials can also be provided via POKEMON_DB_USER/POKEMON_DB_PASSWORD (or PGUSER/PGPASSWORD)."
+        ),
     )
     parser.add_argument(
         "--api-key",
@@ -117,7 +125,17 @@ def main(argv: list[str] | None = None) -> int:
         print("未提供卡牌信息，脚本结束。")
         return 0
 
-    storage = Storage(args.database)
+    try:
+        storage = Storage(args.database)
+    except Exception as exc:  # pragma: no cover - interactive assistance
+        if psycopg is not None and isinstance(exc, psycopg.OperationalError):
+            print(
+                "无法连接到 PostgreSQL 数据库。请在 --database URL 中提供用户名/密码，"
+                "或设置 POKEMON_DB_USER 与 POKEMON_DB_PASSWORD (PGUSER/PGPASSWORD)。",
+                file=sys.stderr,
+            )
+            return 2
+        raise
     client = PokemonTCGClient(base_url=args.base_url, api_key=args.api_key)
     pipeline = RuleCompilationPipeline(
         client=client,

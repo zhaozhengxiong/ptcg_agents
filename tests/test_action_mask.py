@@ -14,6 +14,7 @@ def test_environment_exposes_main_phase_actions() -> None:
 
     assert observation["phase"] == "MAIN_PHASE"
     assert observation["turn"] == 1
+    assert "state_hash" in observation
 
     legal_names = _action_names(env)
     assert {"PLAY_CARD", "ATTACH_ENERGY", "DECLARE_ATTACK", "END_TURN"}.issubset(legal_names)
@@ -64,6 +65,7 @@ def test_attack_ends_turn_and_advances_state_machine() -> None:
     # Ensure the state machine switched to the opposing player.
     assert result.state["turn"] == 2
     assert result.state["phase"] == "MAIN_PHASE"
+    assert "state_hash" in result.state
 
 
 def test_legal_action_payload_contains_metadata() -> None:

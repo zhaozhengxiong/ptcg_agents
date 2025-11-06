@@ -2,10 +2,15 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+import hashlib
+import json
+from dataclasses import asdict, dataclass, field
 from typing import Dict, Iterable, List, Optional
 
+import numpy as np
+
 from core.errors import IllegalActionError
+from core.random_control import generator_from_seed_sequence, spawn_seed_sequence
 from core.state_machine import ActionType, BattleStateMachine, Phase, PlayerSide, StateSnapshot
 from env.types import StepResult
 
@@ -159,6 +164,7 @@ class BattleEnv:
         *,
         rulebook: Optional[ActionRulebook] = None,
         reward_config: RewardConfig | None = None,
+        seed: Optional[int] = None,
     ) -> None:
         self._state_machine = BattleStateMachine()
         self._rulebook = rulebook or ActionRulebook()
@@ -169,11 +175,16 @@ class BattleEnv:
         self._damage_counters: Dict[PlayerSide, int] = {}
         self._pending_reward: float = 0.0
         self._winner: Optional[PlayerSide] = None
+        self._seed_sequence = (
+            np.random.SeedSequence(seed) if seed is not None else spawn_seed_sequence()
+        )
+        self._rng = generator_from_seed_sequence(self._seed_sequence)
 
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
     def reset(self) -> Dict[str, object]:
+        self._rng = generator_from_seed_sequence(self._seed_sequence)
         self._state_machine.reset()
         self._turn_tracker.reset(turn_number=0)
         self._refresh_snapshot()
@@ -229,12 +240,14 @@ class BattleEnv:
             "turn": self._snapshot.turn_number,
             "active_player": self._snapshot.active_player.name,
             "legal_actions": self.legal_actions(),
+            "state_hash": self.state_hash(),
         }
 
     def _build_info(self, done: bool) -> Dict[str, object]:
         info = {
             "prizes": {player.name: progress.prizes_taken for player, progress in self._progress.items()},
             "damage": {player.name: self._damage_counters[player] for player in PlayerSide},
+            "state_hash": self.state_hash(),
         }
         if done and self._winner is not None:
             info["winner"] = self._winner.name
@@ -277,6 +290,35 @@ class BattleEnv:
         reward = self._pending_reward
         self._pending_reward = 0.0
         return reward
+
+    def state_hash(self) -> str:
+        """Return a deterministic hash for the current environment state."""
+
+        payload = {
+            "snapshot": {
+                "phase": self._snapshot.phase.name,
+                "turn": self._snapshot.turn_number,
+                "active_player": self._snapshot.active_player.name,
+            },
+            "turn_tracker": {
+                "turn_number": self._turn_tracker.turn_number,
+                "usage": {
+                    action.name: count
+                    for action, count in sorted(
+                        self._turn_tracker.usage.items(), key=lambda item: item[0].name
+                    )
+                },
+            },
+            "progress": {
+                player.name: asdict(progress)
+                for player, progress in sorted(self._progress.items(), key=lambda item: item[0].name)
+            },
+            "damage": {player.name: self._damage_counters[player] for player in PlayerSide},
+            "pending_reward": self._pending_reward,
+            "winner": self._winner.name if self._winner is not None else None,
+            "rng_state": self._rng.bit_generator.state,
+        }
+        return hashlib.sha256(json.dumps(payload, sort_keys=True).encode("utf8")).hexdigest()
 
 
 __all__ = [

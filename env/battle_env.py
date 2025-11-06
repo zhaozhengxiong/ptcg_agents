@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from typing import Dict, Iterable, List, Optional
 
 from core.errors import IllegalActionError
-from core.state_machine import ActionType, BattleStateMachine, Phase, StateSnapshot
+from core.state_machine import ActionType, BattleStateMachine, Phase, PlayerSide, StateSnapshot
 from env.types import StepResult
 
 
@@ -131,14 +131,44 @@ class ActionRulebook:
         return spec
 
 
+@dataclass
+class PlayerProgress:
+    """Aggregated battle statistics for a player."""
+
+    prizes_taken: int = 0
+    knockouts: int = 0
+
+
+@dataclass(frozen=True)
+class RewardConfig:
+    """Tunable reward constants used by :class:`BattleEnv`."""
+
+    prizes_to_win: int = 6
+    damage_per_attack: int = 30
+    damage_to_knockout: int = 60
+    damage_reward: float = 0.1
+    prize_reward: float = 0.2
+    win_reward: float = 1.0
+
+
 class BattleEnv:
     """Simplified environment that exposes legal action masking."""
 
-    def __init__(self, *, rulebook: Optional[ActionRulebook] = None) -> None:
+    def __init__(
+        self,
+        *,
+        rulebook: Optional[ActionRulebook] = None,
+        reward_config: RewardConfig | None = None,
+    ) -> None:
         self._state_machine = BattleStateMachine()
         self._rulebook = rulebook or ActionRulebook()
         self._turn_tracker = TurnTracker()
         self._snapshot: StateSnapshot = self._state_machine.snapshot()
+        self._reward_config = reward_config or RewardConfig()
+        self._progress: Dict[PlayerSide, PlayerProgress] = {}
+        self._damage_counters: Dict[PlayerSide, int] = {}
+        self._pending_reward: float = 0.0
+        self._winner: Optional[PlayerSide] = None
 
     # ------------------------------------------------------------------
     # Public API
@@ -147,6 +177,10 @@ class BattleEnv:
         self._state_machine.reset()
         self._turn_tracker.reset(turn_number=0)
         self._refresh_snapshot()
+        self._progress = {player: PlayerProgress() for player in PlayerSide}
+        self._damage_counters = {player: 0 for player in PlayerSide}
+        self._pending_reward = 0.0
+        self._winner = None
         self._auto_advance()
         return self._build_observation()
 
@@ -167,7 +201,9 @@ class BattleEnv:
 
         observation = self._build_observation()
         done = self._snapshot.phase == Phase.GAME_END
-        return StepResult(observation, 0.0, done, {})
+        reward = self._consume_pending_reward()
+        info = self._build_info(done)
+        return StepResult(observation, reward, done, info)
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -179,6 +215,8 @@ class BattleEnv:
 
     def _auto_advance(self) -> None:
         while True:
+            if self._snapshot.phase == Phase.ATTACK:
+                self._resolve_attack()
             legal = self._rulebook.legal_actions(self._snapshot, self._turn_tracker)
             if legal or self._snapshot.phase == Phase.GAME_END:
                 break
@@ -193,5 +231,59 @@ class BattleEnv:
             "legal_actions": self.legal_actions(),
         }
 
+    def _build_info(self, done: bool) -> Dict[str, object]:
+        info = {
+            "prizes": {player.name: progress.prizes_taken for player, progress in self._progress.items()},
+            "damage": {player.name: self._damage_counters[player] for player in PlayerSide},
+        }
+        if done and self._winner is not None:
+            info["winner"] = self._winner.name
+        return info
 
-__all__ = ["ActionRulebook", "ActionSpec", "BattleEnv", "TurnTracker"]
+    def _resolve_attack(self) -> None:
+        attacker = self._snapshot.active_player
+        defender = attacker.opponent()
+
+        self._damage_counters[defender] += self._reward_config.damage_per_attack
+        self._push_reward(attacker, self._reward_config.damage_reward)
+
+        if self._damage_counters[defender] >= self._reward_config.damage_to_knockout:
+            self._damage_counters[defender] = 0
+            self._handle_knockout(attacker)
+
+    def _handle_knockout(self, attacker: PlayerSide) -> None:
+        progress = self._progress[attacker]
+        progress.knockouts += 1
+        progress.prizes_taken += 1
+        self._push_reward(attacker, self._reward_config.prize_reward)
+
+        if progress.prizes_taken >= self._reward_config.prizes_to_win:
+            self._declare_winner(attacker)
+
+    def _declare_winner(self, player: PlayerSide) -> None:
+        if self._winner is not None:
+            return
+        self._winner = player
+        self._state_machine.mark_game_over()
+        self._push_reward(player, self._reward_config.win_reward)
+
+    def _push_reward(self, player: PlayerSide, amount: float) -> None:
+        if player is PlayerSide.PLAYER_ONE:
+            self._pending_reward += amount
+        else:
+            self._pending_reward -= amount
+
+    def _consume_pending_reward(self) -> float:
+        reward = self._pending_reward
+        self._pending_reward = 0.0
+        return reward
+
+
+__all__ = [
+    "ActionRulebook",
+    "ActionSpec",
+    "BattleEnv",
+    "PlayerProgress",
+    "RewardConfig",
+    "TurnTracker",
+]

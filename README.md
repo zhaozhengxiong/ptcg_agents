@@ -26,3 +26,27 @@ poetry run pytest -q --cov
 # 4) 运行示例脚本
 poetry run python scripts/example_run.py
 ```
+
+## 自动卡牌规则流水线
+
+### 人工审阅功能如何测试？
+
+项目已经包含针对人工审阅流程的单元测试，运行以下命令即可验证 `Storage.mark_rule_reviewed` 的行为：
+
+```bash
+poetry run pytest rule/tests/test_auto_ir_pipeline.py -k mark_rule_reviewed -q
+```
+
+测试会在内置的 SQLite 数据库上完成生成规则、提交审核以及审核通过/失败的完整流程。
+
+### 卡牌信息与 IR 调试脚本
+
+`rule/scripts/card_ir_demo.py` 脚本可以从标准输入或命令行参数中接收多行形如 `Pidgey MEW 16` 的卡牌信息，并展示从 PokemonTCG.io 获取到的原始数据以及经由 LLM 模板生成的 IR：
+
+```bash
+poetry run python rule/scripts/card_ir_demo.py <<'EOF'
+Pidgey MEW 16
+EOF
+```
+
+脚本默认把结果保存到 `card_ir_demo.db`（SQLite），也可以通过 `--database` 指定 PostgreSQL 连接串，或者使用 `--api-key` 传入 PokemonTCG.io 的密钥。

@@ -18,6 +18,8 @@ numpy = "^1.26"
 pydantic = "^2.9"
 fastapi = "^0.115.0"
 uvicorn = "^0.30.5"
+psycopg = { version = "^3.2", extras = ["binary"] }
+pokemontcgsdk = { path = "../pokemon-tcg-sdk-python-master", develop = false }
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.2"
